@@ -1,0 +1,65 @@
+name: Build Eon (R8 release)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Works with loose project files in the repo root, or with project .zip files there
+      # (the newest zip by version number is used).
+      - name: Find the project (unpack the zip if needed)
+        run: |
+          if [ -f settings.gradle.kts ]; then
+            ROOT=.
+          else
+            ZIP=$(ls -1 *.zip 2>/dev/null | sort -V | tail -1 || true)
+            if [ -z "$ZIP" ]; then
+              echo "No settings.gradle.kts and no .zip in the repo root."; exit 1
+            fi
+            echo "Unpacking $ZIP"
+            mkdir -p _project
+            unzip -q -o "$ZIP" -d _project
+            FOUND=$(find _project -name settings.gradle.kts | head -1)
+            if [ -z "$FOUND" ]; then
+              echo "The zip has no settings.gradle.kts inside."; exit 1
+            fi
+            ROOT=$(dirname "$FOUND")
+          fi
+          echo "Project root: $ROOT"
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+
+      # assembleRelease runs R8 (minify + shrink resources), as set in app/build.gradle.kts
+      - name: Build release APK
+        working-directory: ${{ env.ROOT }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Name the APK
+        run: |
+          mkdir -p dist
+          cp "$ROOT/app/build/outputs/apk/release/app-release.apk" "dist/eon-${{ github.run_number }}.apk"
+
+      # Private to you: download it from the run page (Actions -> the run -> Artifacts).
+      # No release is created, so nothing shows on the repo's Releases page.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eon-apk
+          path: dist/*.apk
+          retention-days: 30
